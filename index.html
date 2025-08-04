@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcrição de Áudio para Texto</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        #audioInfo {
+            min-height: 120px;
+        }
+        #transcriptionResult {
+            min-height: 300px;
+            max-height: 500px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 15px;
+            white-space: pre-wrap;
+        }
+        .progress {
+            height: 6px;
+        }
+        .cursor-pointer {
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h3 class="mb-0"><i class="fas fa-file-alt me-2"></i>Transcrição de Áudio para Texto</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">Selecione um arquivo de áudio:</label>
+                            <input type="file" id="audioInput" class="form-control" 
+                                   accept="audio/mpeg,audio/wav,audio/ogg,audio/aac,audio/x-flac">
+                            <div class="form-text">Formatos suportados: .mp3, .wav, .ogg, .aac, .flac</div>
+                        </div>
+
+                        <div id="audioInfo" class="card mb-4 d-none">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>Informações do Áudio</h5>
+                                    <button id="cancelBtn" class="btn btn-sm btn-outline-danger">
+                                        <i class="fas fa-times me-1"></i> Cancelar
+                                    </button>
+                                </div>
+                                <div id="fileDetails"></div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-2">
+                                <span id="progressText">0% concluído</span>
+                                <span id="timeInfo">00:00:00 / 00:00:00</span>
+                            </div>
+                            <div class="progress">
+                                <div id="progressBar" class="progress-bar"></div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex gap-2 mb-4">
+                            <button id="transcribeBtn" class="btn btn-primary flex-grow-1" disabled>
+                                <i class="fas fa-keyboard me-2"></i> Transcrever para Texto
+                            </button>
+                            <button id="exportBtn" class="btn btn-success" disabled>
+                                <i class="fas fa-download me-2"></i> Exportar
+                            </button>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <label class="form-label fw-bold mb-0">Texto Transcrito:</label>
+                                <div>
+                                    <button id="copyBtn" class="btn btn-sm btn-outline-primary me-1" title="Copiar">
+                                        <i class="fas fa-copy"></i>
+                                    </button>
+                                    <button id="clearBtn" class="btn btn-sm btn-outline-danger" title="Limpar">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="transcriptionResult" class="text-muted">
+                                O texto transcrito aparecerá aqui...
+                            </div>
+                        </div>
+
+                        <div id="statusAlert" class="alert alert-info d-none"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Elementos da UI
+            const audioInput = document.getElementById('audioInput');
+            const audioInfo = document.getElementById('audioInfo');
+            const fileDetails = document.getElementById('fileDetails');
+            const cancelBtn = document.getElementById('cancelBtn');
+            const progressText = document.getElementById('progressText');
+            const timeInfo = document.getElementById('timeInfo');
+            const progressBar = document.getElementById('progressBar');
+            const transcribeBtn = document.getElementById('transcribeBtn');
+            const exportBtn = document.getElementById('exportBtn');
+            const transcriptionResult = document.getElementById('transcriptionResult');
+            const copyBtn = document.getElementById('copyBtn');
+            const clearBtn = document.getElementById('clearBtn');
+            const statusAlert = document.getElementById('statusAlert');
+
+            // Variáveis de estado
+            let audioContext;
+            let audioBuffer;
+            let isProcessing = false;
+            let transcriptionResultText = '';
+
+            // Event listeners
+            audioInput.addEventListener('change', handleAudioFile);
+            cancelBtn.addEventListener('click', resetUI);
+            transcribeBtn.addEventListener('click', startTranscription);
+            exportBtn.addEventListener('click', exportTranscription);
+            copyBtn.addEventListener('click', copyTranscription);
+            clearBtn.addEventListener('click', clearTranscription);
+
+            // Processar arquivo de áudio
+            async function handleAudioFile(event) {
+                const file = event.target.files[0];
+                if (!file || !file.type.startsWith('audio/')) {
+                    showStatus('Por favor, selecione um arquivo de áudio válido', 'danger');
+                    return;
+                }
+
+                resetUI();
+                showStatus('Carregando arquivo de áudio...', 'info');
+
+                try {
+                    // Criar contexto de áudio
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    
+                    // Decodificar o arquivo de áudio
+                    const arrayBuffer = await file.arrayBuffer();
+                    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                    
+                    // Exibir informações do arquivo
+                    displayFileInfo(file, audioBuffer);
+                    transcribeBtn.disabled = false;
+                    hideStatus();
+                } catch (error) {
+                    console.error('Erro ao processar arquivo:', error);
+                    showStatus(`Erro: ${error.message}`, 'danger');
+                }
+            }
+
+            // Exibir informações do arquivo
+            function displayFileInfo(file, buffer) {
+                audioInfo.classList.remove('d-none');
+                
+                const fileType = file.type || 'desconhecido';
+                const fileSize = (file.size / (1024 * 1024)).toFixed(2);
+                const durationText = formatTime(buffer.duration);
+                
+                fileDetails.innerHTML = `
+                    <p><strong>Nome:</strong> ${file.name}</p>
+                    <p><strong>Tipo:</strong> ${fileType}</p>
+                    <p><strong>Tamanho:</strong> ${fileSize} MB</p>
+                    <p><strong>Duração:</strong> ${durationText}</p>
+                    <p><strong>Taxa de amostragem:</strong> ${buffer.sampleRate} Hz</p>
+                `;
+                
+                // Atualizar informações de tempo
+                timeInfo.textContent = `00:00:00 / ${durationText}`;
+            }
+
+            // Iniciar transcrição
+            async function startTranscription() {
+                if (!audioBuffer || isProcessing) return;
+                
+                isProcessing = true;
+                transcribeBtn.disabled = true;
+                exportBtn.disabled = true;
+                transcriptionResult.textContent = 'Transcrevendo...';
+                showStatus('Iniciando transcrição...', 'info');
+
+                try {
+                    // Verificar suporte a Web Speech API
+                    if (!('webkitSpeechRecognition' in window)) {
+                        throw new Error('Seu navegador não suporta reconhecimento de voz. Use Chrome ou Edge.');
+                    }
+                    
+                    const SpeechRecognition = window.webkitSpeechRecognition;
+                    const recognition = new SpeechRecognition();
+                    recognition.continuous = true;
+                    recognition.interimResults = false;
+                    recognition.lang = 'pt-BR';
+                    recognition.maxAlternatives = 1;
+                    
+                    // Dividir o áudio em chunks para processamento
+                    const chunkSize = 30; // segundos
+                    const totalChunks = Math.ceil(audioBuffer.duration / chunkSize);
+                    transcriptionResultText = '';
+                    
+                    for (let i = 0; i < totalChunks; i++) {
+                        const startTime = i * chunkSize;
+                        const endTime = Math.min((i + 1) * chunkSize, audioBuffer.duration);
+                        
+                        showStatus(`Transcrevendo parte ${i + 1} de ${totalChunks}...`, 'info');
+                        
+                        // Extrair chunk do áudio
+                        const chunkBuffer = extractAudioChunk(startTime, endTime);
+                        
+                        // Transcrever o chunk
+                        const text = await transcribeAudioChunk(chunkBuffer, recognition);
+                        
+                        if (text) {
+                            transcriptionResultText += `[${formatTime(startTime)}] ${text}\n\n`;
+                            transcriptionResult.textContent = transcriptionResultText;
+                            transcriptionResult.scrollTop = transcriptionResult.scrollHeight;
+                        }
+                        
+                        // Atualizar progresso
+                        const progress = (endTime / audioBuffer.duration) * 100;
+                        progressBar.style.width = `${progress}%`;
+                        progressText.textContent = `${Math.round(progress)}% concluído`;
+                        timeInfo.textContent = `${formatTime(endTime)} / ${formatTime(audioBuffer.duration)}`;
+                    }
+                    
+                    showStatus('Transcrição concluída com sucesso!', 'success');
+                    exportBtn.disabled = false;
+                } catch (error) {
+                    console.error('Erro na transcrição:', error);
+                    showStatus(`Erro: ${error.message}`, 'danger');
+                    transcriptionResult.textContent = `Erro na transcrição: ${error.message}`;
+                } finally {
+                    isProcessing = false;
+                    transcribeBtn.disabled = false;
+                }
+            }
+
+            // Extrair parte do áudio
+            function extractAudioChunk(startTime, endTime) {
+                const sampleRate = audioBuffer.sampleRate;
+                const startOffset = Math.floor(startTime * sampleRate);
+                const endOffset = Math.floor(endTime * sampleRate);
+                const frameCount = endOffset - startOffset;
+                
+                const chunkBuffer = audioContext.createBuffer(
+                    audioBuffer.numberOfChannels,
+                    frameCount,
+                    sampleRate
+                );
+                
+                for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+                    const channelData = audioBuffer.getChannelData(channel);
+                    const chunkData = chunkBuffer.getChannelData(channel);
+                    
+                    for (let i = 0; i < frameCount; i++) {
+                        chunkData[i] = channelData[startOffset + i];
+                    }
+                }
+                
+                return chunkBuffer;
+            }
+
+            // Transcrever chunk de áudio
+            function transcribeAudioChunk(chunkBuffer, recognition) {
+                return new Promise((resolve) => {
+                    // Converter o buffer de áudio para blob WAV
+                    const audioData = encodeWAV(chunkBuffer);
+                    const audioBlob = new Blob([audioData], { type: 'audio/wav' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    
+                    recognition.onresult = (event) => {
+                        const transcript = Array.from(event.results)
+                            .map(result => result[0].transcript)
+                            .join(' ');
+                        resolve(transcript);
+                    };
+                    
+                    recognition.onerror = (event) => {
+                        console.error('Erro no reconhecimento:', event.error);
+                        resolve('');
+                    };
+                    
+                    recognition.start();
+                    
+                    // Criar e reproduzir áudio temporário
+                    const tempAudio = new Audio(audioUrl);
+                    tempAudio.play();
+                    
+                    tempAudio.onended = () => {
+                        recognition.stop();
+                        URL.revokeObjectURL(audioUrl);
+                    };
+                });
+            }
+
+            // Codificar buffer de áudio para WAV
+            function encodeWAV(buffer) {
+                const numChannels = buffer.numberOfChannels;
+                const sampleRate = buffer.sampleRate;
+                const bytesPerSample = 2;
+                const blockAlign = numChannels * bytesPerSample;
+                const byteRate = sampleRate * blockAlign;
+                const dataSize = buffer.length * blockAlign;
+                const bufferSize = 44 + dataSize;
+                
+                const arrayBuffer = new ArrayBuffer(bufferSize);
+                const view = new DataView(arrayBuffer);
+                
+                // Escrever cabeçalho WAV
+                writeString(view, 0, 'RIFF');
+                view.setUint32(4, bufferSize - 8, true);
+                writeString(view, 8, 'WAVE');
+                writeString(view, 12, 'fmt ');
+                view.setUint32(16, 16, true);
+                view.setUint16(20, 1, true);
+                view.setUint16(22, numChannels, true);
+                view.setUint32(24, sampleRate, true);
+                view.setUint32(28, byteRate, true);
+                view.setUint16(32, blockAlign, true);
+                view.setUint16(34, bytesPerSample * 8, true);
+                writeString(view, 36, 'data');
+                view.setUint32(40, dataSize, true);
+                
+                // Escrever dados de áudio
+                let offset = 44;
+                for (let i = 0; i < buffer.length; i++) {
+                    for (let channel = 0; channel < numChannels; channel++) {
+                        const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i]));
+                        view.setInt16(offset, sample * 32767, true);
+                        offset += 2;
+                    }
+                }
+                
+                return arrayBuffer;
+            }
+
+            // Funções auxiliares
+            function writeString(view, offset, string) {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            }
+
+            function formatTime(seconds) {
+                if (isNaN(seconds)) return '00:00:00';
+                
+                const hrs = Math.floor(seconds / 3600);
+                const mins = Math.floor((seconds % 3600) / 60);
+                const secs = Math.floor(seconds % 60);
+                
+                return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            function exportTranscription() {
+                const blob = new Blob([transcriptionResultText], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                
+                a.href = url;
+                a.download = 'transcricao.txt';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+
+            function copyTranscription() {
+                navigator.clipboard.writeText(transcriptionResultText)
+                    .then(() => {
+                        const originalText = copyBtn.innerHTML;
+                        copyBtn.innerHTML = '<i class="fas fa-check"></i>';
+                        setTimeout(() => {
+                            copyBtn.innerHTML = originalText;
+                        }, 2000);
+                    })
+                    .catch(err => {
+                        console.error('Erro ao copiar:', err);
+                    });
+            }
+
+            function clearTranscription() {
+                if (transcriptionResultText.length === 0) return;
+                
+                if (confirm('Tem certeza que deseja limpar toda a transcrição?')) {
+                    transcriptionResultText = '';
+                    transcriptionResult.textContent = 'O texto transcrito aparecerá aqui...';
+                    exportBtn.disabled = true;
+                }
+            }
+
+            function showStatus(message, type) {
+                statusAlert.textContent = message;
+                statusAlert.className = `alert alert-${type}`;
+                statusAlert.classList.remove('d-none');
+            }
+
+            function hideStatus() {
+                statusAlert.classList.add('d-none');
+            }
+
+            function resetUI() {
+                // Parar processamentos em andamento
+                isProcessing = false;
+                
+                // Limpar recursos de áudio
+                if (audioContext) {
+                    audioContext.close();
+                }
+                
+                // Limpar interface
+                audioInput.value = '';
+                audioInfo.classList.add('d-none');
+                progressBar.style.width = '0%';
+                progressText.textContent = '0% concluído';
+                timeInfo.textContent = '00:00:00 / 00:00:00';
+                transcriptionResultText = '';
+                transcriptionResult.textContent = 'O texto transcrito aparecerá aqui...';
+                transcribeBtn.disabled = true;
+                exportBtn.disabled = true;
+                
+                hideStatus();
+            }
+        });
+    </script>
+</body>
+</html>
